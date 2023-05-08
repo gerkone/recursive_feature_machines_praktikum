@@ -92,11 +92,9 @@ def rfm(
     reg: float = 1e-3,
     L: int = 10,
     train_acc: bool = False,
-    loader: bool = True,
     eval_acc: bool = True,
 ):
-    if loader:
-        print("Loaders provided")
+    if isinstance(train_loader, torch.utils.data.DataLoader):
         X_train, y_train = get_data(train_loader)
         X_test, y_test = get_data(test_loader)
     else:
@@ -117,24 +115,25 @@ def rfm(
         K_train = laplace_kernel_M(X_train, X_train, L, torch.from_numpy(M)).numpy()
         sol = solve(K_train + reg * np.eye(len(K_train)), y_train).T
 
-        if train_acc:
-            preds = (sol @ K_train).T
-            y_pred = torch.from_numpy(preds)
-            preds = torch.argmax(y_pred, dim=-1)
-            labels = torch.argmax(y_train, dim=-1)
-            count = torch.sum(labels == preds).numpy()
-            print("Round " + str(i) + " Train Acc: ", count / len(labels))
-
         K_test = laplace_kernel_M(X_train, X_test, L, torch.from_numpy(M)).numpy()
         preds = (sol @ K_test).T
-        print("Round " + str(i) + " MSE: ", np.mean(np.square(preds - y_test.numpy())))
+        print(f"{i}: test mse: ", np.mean(np.square(preds - y_test.numpy())), end="")
 
         if eval_acc:
             y_pred = torch.from_numpy(preds)
             preds = torch.argmax(y_pred, dim=-1)
             labels = torch.argmax(y_test, dim=-1)
             count = torch.sum(labels == preds).numpy()
-            print("Round " + str(i) + " Acc: ", count / len(labels))
+            print(", eval acc: ", count / len(labels), end="")
+        if train_acc:
+            preds = (sol @ K_train).T
+            y_pred = torch.from_numpy(preds)
+            preds = torch.argmax(y_pred, dim=-1)
+            labels = torch.argmax(y_train, dim=-1)
+            count = torch.sum(labels == preds).numpy()
+            print(", train acc: ", count / len(labels), end="")
+
+        print()
 
         M = get_grads(
             X_train, sol, L, torch.from_numpy(M), batch_size=batch_size
@@ -143,9 +142,10 @@ def rfm(
             hickle.dump(M, "saved_Ms/M_" + name + "_" + str(i) + ".h")
 
     mse, acc = eval_rfm(M, X_train, y_train, X_test, y_test, eval_acc, reg=reg, L=L)
-    print("Final MSE: ", mse)
+
+    print(f"Done. Final test loss: {mse}", end="")
     if acc:
-        print("Final Accuracy: ", acc)
+        print(f", final test acc: {acc}", end="")
 
     return M, mse
 

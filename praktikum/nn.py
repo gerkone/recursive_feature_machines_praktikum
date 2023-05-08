@@ -41,17 +41,23 @@ class MLP(nn.Module):
 
 
 def train_network(
-    model: nn.Module,
     train_loader,
     val_loader,
     test_loader,
+    num_classes=2,
+    width=1024,
+    layers=3,
+    bias=False,
     name=None,
-    save_frames=False,
+    frame_freq=50,
     lr=0.1,
     num_epochs=500,
     opt_fn=torch.optim.SGD,
     eval_acc=False,
 ):
+    _, dim = next(iter(train_loader))[0].shape
+    model = MLP(dim, width=width, layers=layers, num_classes=num_classes, bias=bias)
+
     print(
         "NUMBER OF PARAMS: ",
         sum(p.numel() for p in model.parameters() if p.requires_grad),
@@ -62,11 +68,11 @@ def train_network(
     model.cuda()
     best_val_acc = 0
     best_test_acc = 0
-    best_val_loss = np.float("inf")
-    best_test_loss = 0
+    best_val_mse = np.float("inf")
+    best_test_mse = 0
 
     for i in range(num_epochs):
-        if save_frames:
+        if frame_freq is not None and i % frame_freq == 0:
             model.cpu()
             for idx, p in enumerate(model.parameters()):
                 if idx == 0:
@@ -83,13 +89,13 @@ def train_network(
                 torch.save(d, "nn_models/" + name + "_trained_nn_" + str(i) + ".pth")
             model.cuda()
 
-        train_loss = train_step(model, optimizer, train_loader)
-        val_loss = val_step(model, val_loader)
-        test_loss = val_step(model, test_loader)
+        train_mse = train_step(model, optimizer, train_loader)
+        val_mse = val_step(model, val_loader)
+        test_mse = val_step(model, test_loader)
 
         if eval_acc:
-            val_acc = get_acc(model, val_loader)
             train_acc = get_acc(model, train_loader)
+            val_acc = get_acc(model, val_loader)
             test_acc = get_acc(model, test_loader)
 
         if val_acc >= best_val_acc:
@@ -102,20 +108,17 @@ def train_network(
                 torch.save(d, "nn_models/" + name + "_trained_nn.pth")
             model.cuda()
 
-        if val_loss <= best_val_loss:
-            best_val_loss = val_loss
-            best_test_loss = test_loss
+        if val_mse <= best_val_mse:
+            best_val_mse = val_mse
+            best_test_mse = test_mse
 
-        if i % 50 == 0:
-            print(
-                f"Epoch {i}: Train Loss: {train_loss:.2f}, Val Loss: {val_loss:.2f}",
-                end="",
-            )
-            if eval_acc:
-                print(f", Train Acc: {train_acc:.2f}, Val Acc: {val_acc:.2f}", end="")
-            print()
+        # if i % 50 == 0:
+        #     print(f"{i}: train mse: {train_mse:.2f}, val mse: {val_mse:.2f}",end="",)
+        #     if eval_acc:
+        #         print(f", train acc: {train_acc:.2f}, val acc: {val_acc:.2f}", end="")
+        #     print()
 
-    print(f"Done. Best test loss: {best_test_loss}", end="")
+    print(f"Done. Best test mse: {best_test_mse}", end="")
     if eval_acc:
         print(f", best test acc: {best_test_acc}", end="")
     print()
@@ -136,7 +139,7 @@ def get_data(loader):
 def train_step(model, optimizer, train_loader):
     model.train()
     start = time.time()
-    train_loss = 0.0
+    train_mse = 0.0
 
     for _, batch in enumerate(train_loader):
         optimizer.zero_grad()
@@ -144,18 +147,18 @@ def train_step(model, optimizer, train_loader):
         inputs = inputs.cuda()
         targets = targets.cuda()
         output = model(inputs)
-        loss = torch.mean(torch.pow(output - targets, 2))
-        loss.backward()
+        mse = torch.mean(torch.pow(output - targets, 2))
+        mse.backward()
         optimizer.step()
-        train_loss += loss.cpu().data.numpy() * len(inputs)
+        train_mse += mse.cpu().data.numpy() * len(inputs)
     end = time.time()
-    train_loss = train_loss / len(train_loader.dataset)
-    return train_loss, end - start
+    train_mse = train_mse / len(train_loader.dataset)
+    return train_mse, end - start
 
 
 def val_step(model, val_loader):
     model.eval()
-    val_loss = 0.0
+    val_mse = 0.0
 
     for _, batch in enumerate(val_loader):
         inputs, targets = batch
@@ -163,10 +166,10 @@ def val_step(model, val_loader):
         targets = targets.cuda()
         with torch.no_grad():
             output = model(inputs)
-        loss = torch.mean(torch.pow(output - targets, 2))
-        val_loss += loss.cpu().data.numpy() * len(inputs)
-    val_loss = val_loss / len(val_loader.dataset)
-    return val_loss
+        mse = torch.mean(torch.pow(output - targets, 2))
+        val_mse += mse.cpu().data.numpy() * len(inputs)
+    val_mse = val_mse / len(val_loader.dataset)
+    return val_mse
 
 
 def get_acc(model, loader):
