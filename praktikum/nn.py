@@ -1,28 +1,31 @@
 import time
-from typing import Callable
+from typing import Optional, Tuple
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
+
+from utils import visualize_M_dict
 
 
 class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        width: int = 1024,
-        layers: int = 3,
+        width: int = 128,
+        num_layers: int = 3,
         num_classes: int = 2,
-        activation: Callable = F.relu,
+        activation: nn.Module = nn.ReLU,
         bias: bool = False,
     ):
         super().__init__()
-        self.fc = nn.Sequential(
-            [nn.Linear(dim, width, bias=bias)]
-            + [activation, nn.Linear(width, width, bias=bias)] * (layers - 2)
-            + [nn.Linear(width, num_classes, bias=bias)]
-        )
+        layers = []
+        layers.append(nn.Linear(dim, width, bias=bias))
+        for _ in range(num_layers - 2):
+            layers.append(activation())
+            layers.append(nn.Linear(width, width, bias=bias))
+        layers.append(activation())
+        layers.append(nn.Linear(width, num_classes, bias=bias))
+        self.fc = nn.Sequential(*layers)
 
     @property
     def first(self):
@@ -30,55 +33,55 @@ class MLP(nn.Module):
 
     @property
     def second(self):
-        return self.fc[1]
+        return self.fc[2]
 
     @property
     def last(self):
         return self.fc[-1]
 
+    @property
+    def M(self):
+        M = self.first.weight.data.cpu().numpy()
+        M = M.T @ M
+        return M
+
     def forward(self, x):
         return self.fc(x)
 
 
-def train_network(
+def train(
     train_loader,
     val_loader,
     test_loader,
     num_classes=2,
-    width=1024,
-    layers=3,
+    width=256,
+    num_layers=4,
     bias=False,
     name=None,
-    frame_freq=50,
+    frame_freq=None,
+    save_frames=False,
     lr=0.1,
-    num_epochs=500,
+    num_epochs=200,
     opt_fn=torch.optim.SGD,
-    eval_acc=False,
-):
+    model: Optional[MLP] = None,
+) -> Tuple[MLP, float, float]:
     _, dim = next(iter(train_loader))[0].shape
-    model = MLP(dim, width=width, layers=layers, num_classes=num_classes, bias=bias)
-
-    print(
-        "NUMBER OF PARAMS: ",
-        sum(p.numel() for p in model.parameters() if p.requires_grad),
-    )
+    if model is None:
+        model = MLP(
+            dim, width=width, num_layers=num_layers, num_classes=num_classes, bias=bias
+        )
 
     optimizer = opt_fn(model.parameters(), lr=lr)
 
     model.cuda()
-    best_val_acc = 0
     best_test_acc = 0
-    best_val_mse = np.float("inf")
+    best_val_mse = np.inf
     best_test_mse = 0
 
     for i in range(num_epochs):
         if frame_freq is not None and i % frame_freq == 0:
             model.cpu()
-            for idx, p in enumerate(model.parameters()):
-                if idx == 0:
-                    M = p.data.numpy()
-            M = M.T @ M
-            visualize_M(M, i)
+            visualize_M_dict({"MLP": model.M}, i, save=save_frames)
             model.cuda()
 
         if i == 0 or i == 1:
@@ -89,51 +92,20 @@ def train_network(
                 torch.save(d, "nn_models/" + name + "_trained_nn_" + str(i) + ".pth")
             model.cuda()
 
-        train_mse = train_step(model, optimizer, train_loader)
-        val_mse = val_step(model, val_loader)
-        test_mse = val_step(model, test_loader)
+        _ = train_step(model, optimizer, train_loader)
+        if i % 10 == 0:
+            val_mse, _ = val_step(model, val_loader)
+            if val_mse <= best_val_mse:
+                best_val_mse = val_mse
+                best_test_mse, best_test_acc = val_step(model, test_loader)
+                model.cpu()
+                d = {}
+                d["state_dict"] = model.state_dict()
+                if name is not None:
+                    torch.save(d, "nn_models/" + name + "_trained_nn.pth")
+                model.cuda()
 
-        if eval_acc:
-            train_acc = get_acc(model, train_loader)
-            val_acc = get_acc(model, val_loader)
-            test_acc = get_acc(model, test_loader)
-
-        if val_acc >= best_val_acc:
-            best_val_acc = val_acc
-            best_test_acc = test_acc
-            model.cpu()
-            d = {}
-            d["state_dict"] = model.state_dict()
-            if name is not None:
-                torch.save(d, "nn_models/" + name + "_trained_nn.pth")
-            model.cuda()
-
-        if val_mse <= best_val_mse:
-            best_val_mse = val_mse
-            best_test_mse = test_mse
-
-        # if i % 50 == 0:
-        #     print(f"{i}: train mse: {train_mse:.2f}, val mse: {val_mse:.2f}",end="",)
-        #     if eval_acc:
-        #         print(f", train acc: {train_acc:.2f}, val acc: {val_acc:.2f}", end="")
-        #     print()
-
-    print(f"Done. Best test mse: {best_test_mse}", end="")
-    if eval_acc:
-        print(f", best test acc: {best_test_acc}", end="")
-    print()
-
-    return model
-
-
-def get_data(loader):
-    X = []
-    y = []
-    for idx, batch in enumerate(loader):
-        inputs, labels = batch
-        X.append(inputs)
-        y.append(labels)
-    return torch.cat(X, dim=0), torch.cat(y, dim=0)
+    return model, best_test_mse, best_test_acc
 
 
 def train_step(model, optimizer, train_loader):
@@ -159,49 +131,20 @@ def train_step(model, optimizer, train_loader):
 def val_step(model, val_loader):
     model.eval()
     val_mse = 0.0
-
+    val_acc = 0.0
     for _, batch in enumerate(val_loader):
         inputs, targets = batch
         inputs = inputs.cuda()
         targets = targets.cuda()
         with torch.no_grad():
             output = model(inputs)
+        # loss
         mse = torch.mean(torch.pow(output - targets, 2))
         val_mse += mse.cpu().data.numpy() * len(inputs)
-    val_mse = val_mse / len(val_loader.dataset)
-    return val_mse
-
-
-def get_acc(model, loader):
-    model.eval()
-    count = 0
-    for _, batch in enumerate(loader):
-        inputs, targets = batch
-        with torch.no_grad():
-            output = model(inputs.cuda())
-            target = targets.cuda()
-
+        # accuracy
         preds = torch.argmax(output, dim=-1)
-        labels = torch.argmax(target, dim=-1)
-
-        count += torch.sum(labels == preds).cpu().data.numpy()
-    return count / len(loader.dataset) * 100
-
-
-def visualize_M(M, idx):
-    d, _ = M.shape
-    SIZE = int(np.sqrt(d // 3))
-    F1 = np.diag(M[: SIZE**2, : SIZE**2]).reshape(SIZE, SIZE)
-    F2 = np.diag(M[SIZE**2 : 2 * SIZE**2, SIZE**2 : 2 * SIZE**2]).reshape(
-        SIZE, SIZE
-    )
-    F3 = np.diag(M[2 * SIZE**2 :, 2 * SIZE**2 :]).reshape(SIZE, SIZE)
-    F = np.stack([F1, F2, F3])
-    F = (F - F.min()) / (F.max() - F.min())
-    F = np.rollaxis(F, 0, 3)
-    plt.imshow(F)
-    plt.axis("off")
-    plt.savefig(
-        "./video_logs/" + str(idx).zfill(6) + ".png", bbox_inches="tight", pad_inches=0
-    )
-    return F
+        labels = torch.argmax(targets, dim=-1)
+        val_acc += torch.sum(labels == preds).cpu().data.numpy()
+    val_mse = val_mse / len(val_loader.dataset)
+    val_acc = val_acc / len(val_loader.dataset)
+    return val_mse, val_acc * 100

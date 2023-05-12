@@ -3,7 +3,6 @@ import numpy as np
 import torch
 from numpy.linalg import solve
 import kernels
-from tqdm import tqdm
 import hickle
 
 
@@ -61,7 +60,7 @@ def get_grads(X, sol, L, P, batch_size=2):
 
     bs = batch_size
     batches = torch.split(G, bs)
-    for i in tqdm(range(len(batches))):
+    for i in range(len(batches)):
         grad = batches[i]
         gradT = torch.transpose(grad, 1, 2)
         M += torch.sum(gradT @ grad, dim=0).cpu()
@@ -91,8 +90,6 @@ def rfm(
     batch_size: int = 2,
     reg: float = 1e-3,
     L: int = 10,
-    train_acc: bool = False,
-    eval_acc: bool = True,
 ):
     if isinstance(train_loader, torch.utils.data.DataLoader):
         X_train, y_train = get_data(train_loader)
@@ -115,25 +112,25 @@ def rfm(
         K_train = laplace_kernel_M(X_train, X_train, L, torch.from_numpy(M)).numpy()
         sol = solve(K_train + reg * np.eye(len(K_train)), y_train).T
 
-        K_test = laplace_kernel_M(X_train, X_test, L, torch.from_numpy(M)).numpy()
-        preds = (sol @ K_test).T
-        print(f"{i}: test mse: ", np.mean(np.square(preds - y_test.numpy())), end="")
+        # K_test = laplace_kernel_M(X_train, X_test, L, torch.from_numpy(M)).numpy()
+        # preds = (sol @ K_test).T
+        # print(f"{i}: test mse: ", np.mean(np.square(preds - y_test.numpy())), end="")
 
-        if eval_acc:
-            y_pred = torch.from_numpy(preds)
-            preds = torch.argmax(y_pred, dim=-1)
-            labels = torch.argmax(y_test, dim=-1)
-            count = torch.sum(labels == preds).numpy()
-            print(", eval acc: ", count / len(labels), end="")
-        if train_acc:
-            preds = (sol @ K_train).T
-            y_pred = torch.from_numpy(preds)
-            preds = torch.argmax(y_pred, dim=-1)
-            labels = torch.argmax(y_train, dim=-1)
-            count = torch.sum(labels == preds).numpy()
-            print(", train acc: ", count / len(labels), end="")
+        # if eval_acc:
+        #     y_pred = torch.from_numpy(preds)
+        #     preds = torch.argmax(y_pred, dim=-1)
+        #     labels = torch.argmax(y_test, dim=-1)
+        #     count = torch.sum(labels == preds).numpy()
+        #     print(", eval acc: ", count / len(labels), end="")
+        # if train_acc:
+        #     preds = (sol @ K_train).T
+        #     y_pred = torch.from_numpy(preds)
+        #     preds = torch.argmax(y_pred, dim=-1)
+        #     labels = torch.argmax(y_train, dim=-1)
+        #     count = torch.sum(labels == preds).numpy()
+        #     print(", train acc: ", count / len(labels), end="")
 
-        print()
+        # print()
 
         M = get_grads(
             X_train, sol, L, torch.from_numpy(M), batch_size=batch_size
@@ -141,13 +138,9 @@ def rfm(
         if name is not None:
             hickle.dump(M, "saved_Ms/M_" + name + "_" + str(i) + ".h")
 
-    mse, acc = eval_rfm(M, X_train, y_train, X_test, y_test, eval_acc, reg=reg, L=L)
+    mse, acc = eval_rfm(M, X_train, y_train, X_test, y_test, reg=reg, L=L)
 
-    print(f"Done. Final test loss: {mse}", end="")
-    if acc:
-        print(f", final test acc: {acc}", end="")
-
-    return M, mse
+    return M, mse, acc
 
 
 def eval_rfm(
@@ -156,7 +149,6 @@ def eval_rfm(
     y_train: torch.Tensor,
     X_test: torch.Tensor,
     y_test: torch.Tensor,
-    eval_acc: bool = False,
     reg: float = 1e-3,
     L: int = 10,
 ) -> float:
@@ -166,10 +158,9 @@ def eval_rfm(
     preds = (sol @ K_test).T
     mse = np.mean(np.square(preds - y_test.numpy()))
     acc = None
-    if eval_acc:
-        y_pred = torch.from_numpy(preds)
-        preds = torch.argmax(y_pred, dim=-1)
-        labels = torch.argmax(y_test, dim=-1)
-        count = torch.sum(labels == preds).numpy()
-        acc = count / len(labels)
-    return mse, acc
+    y_pred = torch.from_numpy(preds)
+    preds = torch.argmax(y_pred, dim=-1)
+    labels = torch.argmax(y_test, dim=-1)
+    count = torch.sum(labels == preds).numpy()
+    acc = count / len(labels)
+    return mse, acc * 100
