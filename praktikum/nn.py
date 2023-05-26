@@ -1,10 +1,9 @@
-import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import torch
 import torch.nn as nn
 import numpy as np
 
-from utils import visualize_M_dict
+from visualize import visualize_M_dict
 
 
 class MLP(nn.Module):
@@ -64,7 +63,7 @@ def train(
     num_epochs=200,
     opt_fn=torch.optim.SGD,
     model: Optional[MLP] = None,
-) -> Tuple[MLP, float, float]:
+) -> Tuple[MLP, float, float, Tuple[List, List]]:
     _, dim = next(iter(train_loader))[0].shape
     if model is None:
         model = MLP(
@@ -77,6 +76,8 @@ def train(
     best_test_acc = 0
     best_val_mse = np.inf
     best_test_mse = 0
+    train_accs = []
+    val_accs = []
 
     for i in range(num_epochs):
         if frame_freq is not None and i % frame_freq == 0:
@@ -92,9 +93,12 @@ def train(
                 torch.save(d, "nn_models/" + name + "_trained_nn_" + str(i) + ".pth")
             model.cuda()
 
-        _ = train_step(model, optimizer, train_loader)
+        _, train_acc = train_step(model, optimizer, train_loader)
+
         if i % 10 == 0:
-            val_mse, _ = val_step(model, val_loader)
+            val_mse, val_acc = val_step(model, val_loader)
+            train_accs.append(train_acc)
+            val_accs.append(val_acc)
             if val_mse <= best_val_mse:
                 best_val_mse = val_mse
                 best_test_mse, best_test_acc = val_step(model, test_loader)
@@ -105,13 +109,13 @@ def train(
                     torch.save(d, "nn_models/" + name + "_trained_nn.pth")
                 model.cuda()
 
-    return model, best_test_mse, best_test_acc
+    return model, best_test_mse, best_test_acc, (train_accs, val_accs)
 
 
 def train_step(model, optimizer, train_loader):
     model.train()
-    start = time.time()
     train_mse = 0.0
+    train_acc = 0.0
 
     for _, batch in enumerate(train_loader):
         optimizer.zero_grad()
@@ -123,9 +127,14 @@ def train_step(model, optimizer, train_loader):
         mse.backward()
         optimizer.step()
         train_mse += mse.cpu().data.numpy() * len(inputs)
-    end = time.time()
+        # accuracy
+        preds = torch.argmax(output, dim=-1)
+        labels = torch.argmax(targets, dim=-1)
+        train_acc += torch.sum(labels == preds).cpu().data.numpy()
     train_mse = train_mse / len(train_loader.dataset)
-    return train_mse, end - start
+    train_acc = train_acc / len(train_loader.dataset)
+
+    return train_mse, train_acc * 100
 
 
 def val_step(model, val_loader):
