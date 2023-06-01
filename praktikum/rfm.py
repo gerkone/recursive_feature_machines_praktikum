@@ -101,7 +101,7 @@ def train(
         X_test = torch.from_numpy(X_test)
         y_train = torch.from_numpy(y_train)
         y_test = torch.from_numpy(y_test)
-    
+
     X_train = X_train.float()
     X_test = X_test.float()
     y_train = y_train.long()
@@ -115,7 +115,6 @@ def train(
 
     if M is None:
         M = torch.eye(d, dtype=torch.float32)
-    
 
     for i in range(iters):
         K_train = laplace_kernel_M(X_train, X_train, L, M)

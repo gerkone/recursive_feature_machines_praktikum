@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -25,31 +25,44 @@ def visualize_curves_dict(
 def visualize_M_dict(
     M_dict: Dict[str, Tuple[float, np.ndarray]],
     save: bool = False,
+    target_plots: Optional[List[str]] = None,
+    shape: Optional[Tuple[int, ...]] = None,
     idx: Optional[int] = None,
     title: Optional[str] = None,
 ):
+    if target_plots is None or len(target_plots) == 0:
+        target_plots = ["diag", "eig"]
+    assert all([x in ["diag", "eig"] for x in target_plots])
     # get the feature matrices
     F_dict = {}
     for key, (acc, M) in M_dict.items():
-        F_dict[key] = (acc, get_diagonal_features(M), get_max_eigenvector(M))
+        plots = []
+        if "diag" in target_plots:
+            plots.append(get_diagonal_features(M))
+        if "eig" in target_plots:
+            plots.append(get_max_eigenvector(M, shape))
+        F_dict[key] = (acc, plots)
+
     # plot the feature matrices side by side
-    fig, ax = plt.subplots(2, len(F_dict), figsize=(3 * len(F_dict), 5))
+    fig, ax = plt.subplots(
+        len(target_plots), len(F_dict), figsize=(5 * len(F_dict), 3 * len(target_plots))
+    )
+    if len(target_plots) == 1 or len(F_dict) == 1:
+        ax = ax[None, :]
     # set title
     if title is not None:
         fig.suptitle(title)
     if len(F_dict) == 1:
-        acc, F_diag, F_eig = list(F_dict.values())[0]
-        ax[0].imshow(F_diag)
-        ax[1].imshow(F_eig)
-        ax[0].axis("off")
-        ax[1].axis("off")
+        acc, plots = list(F_dict.values())[0]
+        for p, F in enumerate(plots):
+            ax[p].imshow(F)
+            ax[p].axis("off")
         ax[0].set_title(f"{key} ({acc:.2f}%)")
     else:
-        for i, (key, (acc, F_diag, F_eig)) in enumerate(F_dict.items()):
-            ax[0, i].imshow(F_diag)
-            ax[1, i].imshow(F_eig)
-            ax[0, i].axis("off")
-            ax[1, i].axis("off")
+        for i, (key, (acc, plots)) in enumerate(F_dict.items()):
+            for p, F in enumerate(plots):
+                ax[p, i].imshow(F)
+                ax[p, i].axis("off")
             ax[0, i].set_title(f"{key} ({acc:.2f}%)")
     if save:
         idx = 0 if idx is None else idx
@@ -57,12 +70,14 @@ def visualize_M_dict(
     return F_dict, fig
 
 
-def get_max_eigenvector(M: np.ndarray) -> np.ndarray:
+def get_max_eigenvector(M: np.ndarray, shape=None) -> np.ndarray:
     d = M.shape[0]
-    SIZE = int(np.sqrt(d // 3))
+    if shape is None:
+        size = int(np.sqrt(d // 3))
+        shape = (3, size, size)
     u, v = np.linalg.eig(M)
     idx = np.argmax(u)
-    F = v.real[:, idx].reshape(3, SIZE, SIZE)
+    F = v.real[:, idx].reshape(shape)
     F = (F - F.min()) / (F.max() - F.min())
     F = np.moveaxis(F, 0, -1)
     return F
@@ -70,12 +85,10 @@ def get_max_eigenvector(M: np.ndarray) -> np.ndarray:
 
 def get_diagonal_features(M: np.ndarray) -> np.ndarray:
     d = M.shape[0]
-    SIZE = int(np.sqrt(d // 3))
-    F1 = np.diag(M[: SIZE**2, : SIZE**2]).reshape(SIZE, SIZE)
-    F2 = np.diag(M[SIZE**2 : 2 * SIZE**2, SIZE**2 : 2 * SIZE**2]).reshape(
-        SIZE, SIZE
-    )
-    F3 = np.diag(M[2 * SIZE**2 :, 2 * SIZE**2 :]).reshape(SIZE, SIZE)
+    s = int(np.sqrt(d // 3))
+    F1 = np.diag(M[: s**2, : s**2]).reshape(s, s)
+    F2 = np.diag(M[s**2 : 2 * s**2, s**2 : 2 * s**2]).reshape(s, s)
+    F3 = np.diag(M[2 * s**2 :, 2 * s**2 :]).reshape(s, s)
     F = np.stack([F1, F2, F3])
     F = (F - F.min()) / (F.max() - F.min())
     F = np.moveaxis(F, 0, -1)

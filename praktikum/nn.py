@@ -109,6 +109,9 @@ def train(
                     torch.save(d, "nn_models/" + name + "_trained_nn.pth")
                 model.cuda()
 
+    if best_test_acc == 0 and best_test_mse == 0:
+        best_test_mse, best_test_acc = val_step(model, test_loader)
+
     return model, best_test_mse, best_test_acc, (train_accs, val_accs)
 
 
