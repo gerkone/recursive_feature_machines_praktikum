@@ -1,7 +1,7 @@
 # Experiment repository for the TUM praktikum "Analysis of new phenomena in machine learning"
 
-> __Feature learning in neural networks and kernel machines that recursively learn features__
-> Adityanarayanan Radhakrishnan, Daniel Beaglehole, Parthe Pandit, Mikhail Belkin
+> __Feature learning in neural networks and kernel machines that recursively learn features__<br>
+> Adityanarayanan Radhakrishnan, Daniel Beaglehole, Parthe Pandit, Mikhail Belkin<br>
 > https://arxiv.org/abs/2212.13881
 
 ### First part
