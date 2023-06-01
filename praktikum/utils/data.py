@@ -136,7 +136,3 @@ def get_tabular_datasets(data_list: List, num_samples=None) -> Dict:
                 if class_count[0] == 0 and class_count[1] == 0:
                     break
     return dataset_dict
-
-
-if __name__ == "__main__":
-    data = get_tabular_datasets(["miniboone"], num_samples=1000)

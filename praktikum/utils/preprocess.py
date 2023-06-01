@@ -66,36 +66,3 @@ def concatenate_datasets(destination, source, targets):
             )
         )
     return new_dataset
-
-
-if __name__ == "__main__":
-    from torchvision import transforms
-    from torchvision.datasets import MNIST, STL10
-    import os
-    from data_utils import get_stl10_balanced_data, split
-
-    dataset_path = os.path.join(os.getcwd(), "praktikum/datasets")
-    if not os.path.exists(dataset_path):
-        os.makedirs(dataset_path)
-    mnist_transform = transforms.Compose([transforms.ToTensor()])
-    mnist_trainset_full = MNIST(
-        dataset_path, train=True, transform=mnist_transform, download=True
-    )
-    mnist_testset_full = MNIST(
-        dataset_path, train=False, transform=mnist_transform, download=True
-    )
-    # MNIST images are (28, 28), match shape for concatenation
-    stl10_transform = transforms.Compose(
-        [transforms.Resize([28, 28]), transforms.ToTensor()]
-    )
-    stl10_trainset_full = STL10(
-        root=dataset_path, split="train", transform=stl10_transform, download=True
-    )
-    stl10_testset_full = STL10(
-        root=dataset_path, split="test", transform=stl10_transform, download=True
-    )
-    stl10_trainset = get_stl10_balanced_data(
-        stl10_trainset_full, num_samples=100, targets=[0, 9]
-    )
-
-    concatenate_datasets(stl10_trainset, mnist_trainset_full, [0, 9])
