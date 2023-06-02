@@ -1,5 +1,5 @@
-from sklearn.ensemble import GradientBoostingClassifier
 import numpy as np
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, mean_squared_error
 
 

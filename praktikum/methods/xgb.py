@@ -1,6 +1,6 @@
-from xgboost import XGBClassifier
 import numpy as np
 from sklearn.metrics import accuracy_score, mean_squared_error
+from xgboost import XGBClassifier
 
 
 def train(

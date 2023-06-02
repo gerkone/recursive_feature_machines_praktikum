@@ -1,8 +1,10 @@
 import numpy as np
 import torch
+import copy
 
 
 def add_grok_tip(dataset):
+    dataset = copy.deepcopy(dataset)
     grokked_dataset = []
 
     d = dataset[0][0].shape[0]

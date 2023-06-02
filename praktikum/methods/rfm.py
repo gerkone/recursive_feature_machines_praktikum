@@ -1,9 +1,10 @@
 from typing import Optional
+
+import hickle
+import methods.kernels as kernels
 import numpy as np
 import torch
 from torch.linalg import solve
-import kernels
-import hickle
 
 
 def laplace_kernel_M(pair1, pair2, bandwidth, M):

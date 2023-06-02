@@ -1,9 +1,9 @@
-from typing import Optional, Tuple, List
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-
-from visualize import visualize_M_dict
+from utils.visualize import get_max_eigenvector
 
 
 class MLP(nn.Module):
@@ -58,12 +58,11 @@ def train(
     bias=False,
     name=None,
     frame_freq=None,
-    save_frames=False,
     lr=0.1,
     num_epochs=200,
     opt_fn=torch.optim.SGD,
     model: Optional[MLP] = None,
-) -> Tuple[MLP, float, float, Tuple[List, List]]:
+) -> Tuple[MLP, float, float, Tuple[List, List], Optional[Dict]]:
     _, dim = next(iter(train_loader))[0].shape
     if model is None:
         model = MLP(
@@ -71,6 +70,8 @@ def train(
         )
 
     optimizer = opt_fn(model.parameters(), lr=lr)
+
+    frames = {}
 
     model.cuda()
     best_test_acc = 0
@@ -82,7 +83,7 @@ def train(
     for i in range(num_epochs):
         if frame_freq is not None and i % frame_freq == 0:
             model.cpu()
-            visualize_M_dict({"MLP": model.M}, i, save=save_frames)
+            frames[i] = get_max_eigenvector(model.M)
             model.cuda()
 
         if i == 0 or i == 1:
@@ -111,6 +112,9 @@ def train(
 
     if best_test_acc == 0 and best_test_mse == 0:
         best_test_mse, best_test_acc = val_step(model, test_loader)
+
+    if frame_freq is not None:
+        return model, best_test_mse, best_test_acc, (train_accs, val_accs), frames
 
     return model, best_test_mse, best_test_acc, (train_accs, val_accs)
 

@@ -7,7 +7,7 @@ def visualize_curves_dict(
     accs: Dict,
     title: Optional[str] = None,
 ):
-    fig, ax = plt.subplots(1, len(accs), figsize=(5 * len(accs), 5))
+    fig, ax = plt.subplots(1, len(accs), figsize=(6 * len(accs), 4))
 
     for i, (key, (train_acc, val_acc)) in enumerate(accs.items()):
         ax[i].plot(train_acc, label="train")
