@@ -21,7 +21,7 @@ def onehot_encode(y, targets):
     onehot = np.zeros(len(targets))
     onehot[targets.index(y)] = 1
     return onehot
-    
+
 
 def split(trainset, p=0.8):
     train, val = train_test_split(trainset, train_size=p)
@@ -64,7 +64,7 @@ def get_stl10_data(dataset, targets: List = [0, 9], num_samples=None, class_rati
     assert len(targets) == 2
     if num_samples is None:
         num_samples = 0
-    
+
     in_target_samples = sum(1 if label in targets else 0 for _, label in dataset)
     num_samples = max(in_target_samples, num_samples)
 
@@ -77,9 +77,8 @@ def get_stl10_data(dataset, targets: List = [0, 9], num_samples=None, class_rati
             if class_counts[targets.index(label)] < num_samples * r:
                 class_counts[targets.index(label)] += 1
                 adjusted.append((ex.flatten(), onehot_encode(label, targets)))
-    
-    return adjusted
 
+    return adjusted
 
 
 TABULAR_DATA_URLS = {
