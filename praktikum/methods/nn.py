@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from utils.visualize import get_max_eigenvector
+from utils.visualize import get_diagonal_features
 
 
 class MLP(nn.Module):
@@ -15,8 +15,10 @@ class MLP(nn.Module):
         num_classes: int = 2,
         activation: nn.Module = nn.ReLU,
         bias: bool = False,
+        grok_init: bool = False,
     ):
         super().__init__()
+        self._init_gain = 2.0 if grok_init else 1
         layers = []
         layers.append(nn.Linear(dim, width, bias=bias))
         for _ in range(num_layers - 2):
@@ -25,6 +27,13 @@ class MLP(nn.Module):
         layers.append(activation())
         layers.append(nn.Linear(width, num_classes, bias=bias))
         self.fc = nn.Sequential(*layers)
+
+    def reset_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight, self._init_gain)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     @property
     def first(self):
@@ -58,18 +67,25 @@ def train(
     bias=False,
     name=None,
     frame_freq=None,
-    lr=0.1,
+    lr=1e-2,
     num_epochs=200,
     opt_fn=torch.optim.SGD,
     model: Optional[MLP] = None,
+    grok_init: bool = False,
 ) -> Tuple[MLP, float, float, Tuple[List, List], Optional[Dict]]:
     _, dim = next(iter(train_loader))[0].shape
     if model is None:
         model = MLP(
-            dim, width=width, num_layers=num_layers, num_classes=num_classes, bias=bias
+            dim,
+            width=width,
+            num_layers=num_layers,
+            num_classes=num_classes,
+            bias=bias,
+            grok_init=grok_init,
         )
+        model.reset_weights()
 
-    optimizer = opt_fn(model.parameters(), lr=lr)
+    optimizer = opt_fn(model.parameters(), lr=lr, weight_decay=1e-6)
 
     frames = {}
 
@@ -83,7 +99,7 @@ def train(
     for i in range(num_epochs):
         if frame_freq is not None and i % frame_freq == 0:
             model.cpu()
-            frames[i] = get_max_eigenvector(model.M)
+            frames[i] = get_diagonal_features(model.M)
             model.cuda()
 
         if i == 0 or i == 1:
@@ -96,19 +112,18 @@ def train(
 
         _, train_acc = train_step(model, optimizer, train_loader)
 
-        if i % 10 == 0:
-            val_mse, val_acc = val_step(model, val_loader)
-            train_accs.append(train_acc)
-            val_accs.append(val_acc)
-            if val_mse <= best_val_mse:
-                best_val_mse = val_mse
-                best_test_mse, best_test_acc = val_step(model, test_loader)
-                model.cpu()
-                d = {}
-                d["state_dict"] = model.state_dict()
-                if name is not None:
-                    torch.save(d, "nn_models/" + name + "_trained_nn.pth")
-                model.cuda()
+        val_mse, val_acc = val_step(model, val_loader)
+        train_accs.append(train_acc)
+        val_accs.append(val_acc)
+        if val_mse <= best_val_mse:
+            best_val_mse = val_mse
+            best_test_mse, best_test_acc = val_step(model, test_loader)
+            model.cpu()
+            d = {}
+            d["state_dict"] = model.state_dict()
+            if name is not None:
+                torch.save(d, "nn_models/" + name + "_trained_nn.pth")
+            model.cuda()
 
     if best_test_acc == 0 and best_test_mse == 0:
         best_test_mse, best_test_acc = val_step(model, test_loader)

@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+import scipy
 import matplotlib.pyplot as plt
 
 
@@ -75,7 +76,8 @@ def get_max_eigenvector(M: np.ndarray, shape=None) -> np.ndarray:
     if shape is None:
         size = int(np.sqrt(d // 3))
         shape = (3, size, size)
-    u, v = np.linalg.eig(M)
+    # u, v = np.linalg.eigh(M)
+    u, v = scipy.linalg.eigh(M, subset_by_index=(d - 1, d - 1))
     idx = np.argmax(u)
     F = v.real[:, idx].reshape(shape)
     F = (F - F.min()) / (F.max() - F.min())

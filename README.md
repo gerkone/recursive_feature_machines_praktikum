@@ -11,5 +11,5 @@
 3. __Special phenomena__: Neural networks and RFMs exhibit grokking and simplicity bias
 
 ### Second part
-[extensions.ipynb](praktikum/extensions.ipynb) contains some proposed extensions or new experiments.
+[extensions.ipynb](praktikum/extension.ipynb) contains some proposed extensions or new experiments.
 

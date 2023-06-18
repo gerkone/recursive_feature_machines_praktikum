@@ -17,6 +17,12 @@ CELEBA_FEATURES = {
 }
 
 
+def onehot_encode(y, targets):
+    onehot = np.zeros(len(targets))
+    onehot[targets.index(y)] = 1
+    return onehot
+    
+
 def split(trainset, p=0.8):
     train, val = train_test_split(trainset, train_size=p)
     return train, val
@@ -54,29 +60,31 @@ def get_celeba_balanced_data(
     return data
 
 
-def get_stl10_balanced_data(dataset, targets: List = [0, 9], num_samples=None):
+def get_stl10_data(dataset, targets: List = [0, 9], num_samples=None, class_ratio=0.5):
+    assert len(targets) == 2
     if num_samples is None:
-        num_samples = len(dataset)
-
-    subset = [
-        (ex, label)
-        for idx, (ex, label) in enumerate(dataset)
-        if idx < num_samples and label in targets
-    ]
+        num_samples = 0
+    
+    in_target_samples = sum(1 if label in targets else 0 for _, label in dataset)
+    num_samples = max(in_target_samples, num_samples)
 
     adjusted = []
-
-    count = 0
-    for idx, (ex, label) in enumerate(subset):
-        ex = ex.flatten()
-        onehot = np.zeros(len(targets))
-        onehot[targets.index(label)] = 1
-        adjusted.append((ex, onehot))
+    class_counts = [0, 0]
+    class_ratios = [class_ratio, 1 - class_ratio]
+    for _, (ex, label) in enumerate(dataset):
+        if len(adjusted) < num_samples and label in targets:
+            r = class_ratios[targets.index(label)]
+            if class_counts[targets.index(label)] < num_samples * r:
+                class_counts[targets.index(label)] += 1
+                adjusted.append((ex.flatten(), onehot_encode(label, targets)))
+    
     return adjusted
+
 
 
 TABULAR_DATA_URLS = {
     "electricity": "https://api.openml.org/data/download/22103245/dataset",
+    "telescope": "https://www.openml.org/data/download/54003/dataset",
     "miniboone": "https://api.openml.org/data/download/22103253/dataset",
     "higgs": "https://api.openml.org/data/download/22103254/dataset",
     "jannis": "https://api.openml.org/data/download/22111907/dataset",
@@ -86,13 +94,14 @@ TABULAR_DATA_URLS = {
 TABULAR_DATA_TARGETS = {
     "electricity": "class",
     "miniboone": "signal",
+    "telescope": "class:",
     "higgs": "target",
     "jannis": "class",
     "covertype": "Y",
 }
 
 
-def get_tabular_datasets(data_list: List, num_samples=None) -> Dict:
+def get_tabular_datasets(data_list: List, max_samples=None) -> Dict:
     dest_dir = os.path.join(os.getcwd(), "datasets/tabular")
     if not os.path.exists(dest_dir):
         os.makedirs(dest_dir)
@@ -123,8 +132,8 @@ def get_tabular_datasets(data_list: List, num_samples=None) -> Dict:
 
             # subsample balanced classes
             class_count = list(np.bincount(labels))
-            if num_samples:
-                num_samples = min(num_samples, min(class_count[0], class_count[1]))
+            if max_samples:
+                num_samples = min(max_samples, min(class_count[0], class_count[1]))
                 class_count = [num_samples // 2, num_samples - num_samples // 2]
             dataset_dict[ds] = []
             for x, y in zip(data, labels):

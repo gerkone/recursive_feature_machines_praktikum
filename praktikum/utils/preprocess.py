@@ -16,13 +16,13 @@ def add_grok_tip(dataset):
         star_size = max(im_size // 20, 5)
 
         if label[0] == 1:
-            star_color = -1
+            star_color = +1
         if label[1] == 1:
-            star_color = 1
+            star_color = -1
 
         # Generate the star shape tensor
         x_pos = im_size - 2 * star_size
-        y_pos = 2 * star_size
+        y_pos = star_size
         center = star_size // 2
         right = torch.arange(center + 1, star_size)
         left = torch.arange(center)
@@ -54,7 +54,7 @@ def add_grok_tip(dataset):
 
 
 def concatenate_datasets(destination, source, targets):
-    """Attach on the right the images from source to the targets by matching the labels"""
+    """Attach the images from source to the targets by matching the labels"""
     new_dataset = []
     candidates = [[x for x in source if x[1] == trg] for trg in targets]
 
