@@ -29,7 +29,7 @@ def split(trainset, p=0.8):
 
 
 def get_celeba_balanced_data(
-    dataset, num_classes: int = 2, target: str = "glasses", num_samples=None
+    dataset, num_classes: int = 2, target: str = "glasses", num_samples=None, norm=True
 ):
     if num_samples is None:
         num_samples = len(dataset)
@@ -42,7 +42,8 @@ def get_celeba_balanced_data(
         features.append(label[feature_idx])
         g = label[feature_idx].numpy().item()
         ex = ex.flatten()
-        ex = ex / torch.linalg.norm(ex)
+        if norm:
+            ex = ex / torch.linalg.norm(ex)
 
         onehot = np.zeros(num_classes)
         onehot[g] = 1

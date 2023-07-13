@@ -48,7 +48,9 @@ def visualize_M_dict(
     fig, ax = plt.subplots(
         len(target_plots), len(F_dict), figsize=(5 * len(F_dict), 3 * len(target_plots))
     )
-    if len(target_plots) == 1 or len(F_dict) == 1:
+    if len(target_plots) == 1 and len(F_dict) == 1:
+        ax = [ax]
+    elif len(target_plots) == 1 or len(F_dict) == 1:
         ax = ax[None, :]
     # set title
     if title is not None:

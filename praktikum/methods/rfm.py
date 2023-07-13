@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from torch.linalg import solve
 
+import methods.nn as nn
+
 
 def laplace_kernel_M(pair1, pair2, bandwidth, M):
     return kernels.laplacian_M(pair1, pair2, bandwidth, M)
@@ -86,7 +88,6 @@ def train(
     test_loader,
     M: Optional[np.ndarray] = None,
     iters: int = 3,
-    name: Optional[str] = None,
     batch_size: int = 2,
     reg: float = 1e-3,
     L: int = 10,
@@ -117,34 +118,161 @@ def train(
     if M is None:
         M = torch.eye(d, dtype=torch.float32)
 
-    for i in range(iters):
+    if isinstance(M, np.ndarray):
+        M = torch.tensor(M, dtype=torch.float32)
+
+    for _ in range(iters):
         K_train = laplace_kernel_M(X_train, X_train, L, M)
         sol = solve((K_train + reg).float(), y_train.float()).T
 
-        _, train_acc = eval_rfm(M, X_train, y_train, X_train, y_train, reg=reg, L=L)
+        _, train_acc = eval_rfm(M, X_train, X_train, y_train, sol=sol)
         train_accs.append(train_acc)
-        test_mse, test_acc = eval_rfm(M, X_train, y_train, X_test, y_test, reg=reg, L=L)
+        test_mse, test_acc = eval_rfm(M, X_train, X_test, y_test, sol=sol)
         test_accs.append(test_acc)
 
         M = get_grads(X_train, sol, L, M, batch_size=batch_size).float()
-        if name is not None:
-            hickle.dump(M, "saved_Ms/M_" + name + "_" + str(i) + ".h")
 
     return M, test_mse, test_acc, (train_accs, test_accs)
+
+
+class RFMLP(torch.nn.Module):
+    def __init__(self, d, L, reg):
+        super().__init__()
+        self.L = L
+        self.reg = reg
+
+        self.lin = torch.nn.Linear(d, d, bias=False)
+
+    @property
+    def M(self):
+        M = self.lin.weight
+        M = M.T @ M
+        return M
+
+    def forward(self, X, y):
+        K_train = laplace_kernel_M(X, X, self.L, self.M)
+        reg = self.reg * torch.eye(len(y))
+        sol = solve((K_train + reg).float(), y.float()).T
+        return sol
+
+
+class RFMLP2(RFMLP):
+    def __init__(self, d, L, reg, num_layers=3):
+        super().__init__(d, L, reg)
+        self._M = None
+
+        self.net = nn.MLP(d, d, num_layers=num_layers, num_classes=d)
+
+    @property
+    def M(self):
+        return self._M
+
+    def forward(self, X, y):
+        # average over batch
+        M2 = self.net(X).mean(dim=0, keepdim=True)
+        M2 = M2.T @ M2
+        # M memory
+        self._M = M2
+        K_train = laplace_kernel_M(X, X, self.L, M2)
+        reg = self.reg * torch.eye(len(y))
+        sol = solve((K_train + reg).float(), y.float()).T
+        return sol
+
+
+class RFMCNN(RFMLP):
+    def __init__(self, d, L, reg):
+        super().__init__(d, L, reg)
+        self._M = None
+
+        self.net = nn.CNN(d)
+
+    @property
+    def M(self):
+        return self._M
+
+    def forward(self, X, y):
+        # average over batch
+        bs, d2 = X.shape
+        d = int(np.sqrt(d2))
+        M2 = self.net(X.view(bs, d, d)).mean(dim=0, keepdim=True)
+        M2 = M2.T @ M2
+        # M memory
+        self._M = M2
+        K_train = laplace_kernel_M(X, X, self.L, M2)
+        reg = self.reg * torch.eye(len(y))
+        sol = solve((K_train + reg).float(), y.float()).T
+        return sol
+
+
+def train_hypernet(
+    train_loader,
+    test_loader,
+    model: Optional[RFMLP] = None,
+    iters: int = 3,
+    reg: float = 1e-3,
+    L: int = 10,
+):
+    if isinstance(train_loader, torch.utils.data.DataLoader):
+        X_train, y_train = get_data(train_loader)
+        X_test, y_test = get_data(test_loader)
+    else:
+        X_train, y_train = train_loader
+        X_test, y_test = test_loader
+
+        X_train = torch.from_numpy(X_train)
+        X_test = torch.from_numpy(X_test)
+        y_train = torch.from_numpy(y_train)
+        y_test = torch.from_numpy(y_test)
+
+    X_train = X_train.float()
+    X_test = X_test.float()
+    y_train = y_train.long()
+    y_test = y_test.long()
+
+    d = X_train.shape[1]
+    reg = reg * torch.eye(len(y_train))
+
+    train_accs = []
+    test_accs = []
+
+    if model is None:
+        model = RFMLP(d, L, reg)
+
+    opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+    for _ in range(iters):
+        sol = model(X_train, y_train)
+        mse, train_acc = eval_rfm(model.M, X_train, X_train, y_train, sol=sol)
+        train_accs.append(train_acc)
+        test_mse, test_acc = eval_rfm(model.M, X_train, X_test, y_test, sol=sol)
+        test_accs.append(test_acc)
+
+        # update hypernetwork
+        opt.zero_grad()
+        mse.backward()
+        opt.step()
+
+    return model, test_mse, test_acc, (train_accs, test_accs)
 
 
 def eval_rfm(
     M: np.ndarray,
     X_train: torch.Tensor,
-    y_train: torch.Tensor,
     X_test: torch.Tensor,
     y_test: torch.Tensor,
+    y_train: Optional[torch.Tensor] = None,
+    sol: Optional[torch.Tensor] = None,
     reg: float = 1e-3,
     L: int = 10,
 ) -> float:
-    K_train = laplace_kernel_M(X_train, X_train, L, M)
-    reg = reg * torch.eye(len(y_train))
-    sol = solve((K_train + reg).float(), y_train.float()).T
+    if y_train is None and sol is None:
+        raise ValueError("Must provide either y_train or sol")
+
+    if sol is None:
+        K_train = laplace_kernel_M(X_train, X_train, L, M)
+        reg = reg * torch.eye(len(y_train))
+        sol = solve((K_train + reg).float(), y_train.float()).T
+
     K_test = laplace_kernel_M(X_train, X_test, L, M)
     preds = (sol @ K_test).T
     mse = torch.mean((preds - y_test) ** 2)

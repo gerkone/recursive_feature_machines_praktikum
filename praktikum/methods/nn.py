@@ -1,7 +1,11 @@
 from typing import Dict, List, Optional, Tuple
+import copy
 
 import numpy as np
 import torch
+from torch_pso import ParticleSwarmOptimizer
+from torch_optimizer.adahessian import Adahessian
+import scipy
 import torch.nn as nn
 from utils.visualize import get_diagonal_features
 
@@ -16,9 +20,12 @@ class MLP(nn.Module):
         activation: nn.Module = nn.ReLU,
         bias: bool = False,
         grok_init: bool = False,
+        layer_dropout: float = 0.0,
     ):
         super().__init__()
         self._init_gain = 2.0 if grok_init else 1
+        self._layer_dropout = layer_dropout
+
         layers = []
         layers.append(nn.Linear(dim, width, bias=bias))
         for _ in range(num_layers - 2):
@@ -53,8 +60,68 @@ class MLP(nn.Module):
         M = M.T @ M
         return M
 
+    @property
+    def M_second(self):
+        M = self.second.weight.data.cpu().numpy()
+        M = M.T @ M
+        return M
+
+    def set_M(self, M, method="cholesky"):
+        assert method in ["cholesky", "eig"]
+        model = copy.deepcopy(self)
+
+        if method == "cholesky":
+            x = torch.linalg.cholesky(torch.tensor(M)).T
+        if method == "eig":
+            x = torch.tensor(scipy.linalg.sqrtm(M)).real.T
+
+        model.first.weight.data = x.to(self.second.weight.device)
+        return model
+
+    def destroy_M(self, method="uniform"):
+        assert method in ["uniform", "eye"]
+        model = copy.deepcopy(self)
+
+        if method == "uniform":
+            nn.init.xavier_uniform_(model.first.weight)
+        if method == "eye":
+            nn.init.eye_(model.first.weight)
+
+        if model.first.bias is not None:
+            nn.init.zeros_(model.first.bias)
+
+        return model
+
     def forward(self, x):
-        return self.fc(x)
+        iter_layer = iter(self.fc)
+        for layer_i in iter_layer:
+            # drop first layer with probability layer_dropout
+            if layer_i == self.first and torch.rand(1) < self._layer_dropout:
+                continue
+            x = layer_i(x)
+        return x
+
+
+class CNN(nn.Module):
+    def __init__(self, out_size: int):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
+        self.fc1 = nn.Linear(32 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, out_size)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, 2)
+        x = self.conv2(x)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, 2)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = torch.relu(x)
+        x = self.fc2(x)
+        return x
 
 
 def train(
@@ -68,8 +135,10 @@ def train(
     name=None,
     frame_freq=None,
     lr=1e-2,
+    weight_decay=1e-6,
     num_epochs=200,
     opt_fn=torch.optim.SGD,
+    opt_kwargs={},
     model: Optional[MLP] = None,
     grok_init: bool = False,
 ) -> Tuple[MLP, float, float, Tuple[List, List], Optional[Dict]]:
@@ -85,11 +154,15 @@ def train(
         )
         model.reset_weights()
 
-    optimizer = opt_fn(model.parameters(), lr=lr, weight_decay=1e-6)
+    model_best = copy.deepcopy(model.cpu())
+
+    if opt_fn != ParticleSwarmOptimizer:
+        opt_kwargs.setdefault("lr", lr)
+        opt_kwargs.setdefault("weight_decay", weight_decay)
+    optimizer = opt_fn(model.parameters(), **opt_kwargs)
 
     frames = {}
 
-    model.cuda()
     best_test_acc = 0
     best_val_mse = np.inf
     best_test_mse = 0
@@ -97,18 +170,9 @@ def train(
     val_accs = []
 
     for i in range(num_epochs):
+        model = model.cuda()
         if frame_freq is not None and i % frame_freq == 0:
-            model.cpu()
-            frames[i] = get_diagonal_features(model.M)
-            model.cuda()
-
-        if i == 0 or i == 1:
-            model.cpu()
-            d = {}
-            d["state_dict"] = model.state_dict()
-            if name is not None:
-                torch.save(d, "nn_models/" + name + "_trained_nn_" + str(i) + ".pth")
-            model.cuda()
+            frames[i] = get_diagonal_features(model.cpu().M)
 
         _, train_acc = train_step(model, optimizer, train_loader)
 
@@ -118,20 +182,18 @@ def train(
         if val_mse <= best_val_mse:
             best_val_mse = val_mse
             best_test_mse, best_test_acc = val_step(model, test_loader)
-            model.cpu()
+            model_best = copy.deepcopy(model.cpu())
             d = {}
-            d["state_dict"] = model.state_dict()
+            d["state_dict"] = model_best.state_dict()
             if name is not None:
                 torch.save(d, "nn_models/" + name + "_trained_nn.pth")
-            model.cuda()
-
     if best_test_acc == 0 and best_test_mse == 0:
         best_test_mse, best_test_acc = val_step(model, test_loader)
 
     if frame_freq is not None:
         return model, best_test_mse, best_test_acc, (train_accs, val_accs), frames
 
-    return model, best_test_mse, best_test_acc, (train_accs, val_accs)
+    return model_best, best_test_mse, best_test_acc, (train_accs, val_accs)
 
 
 def train_step(model, optimizer, train_loader):
@@ -145,9 +207,16 @@ def train_step(model, optimizer, train_loader):
         inputs = inputs.cuda()
         targets = targets.cuda()
         output = model(inputs)
-        mse = torch.mean(torch.pow(output - targets, 2))
-        mse.backward()
-        optimizer.step()
+        mse = torch.mean((output - targets) ** 2)
+        if isinstance(optimizer, ParticleSwarmOptimizer):
+            optimizer.step(lambda: mse)
+            model = model.cuda()
+        else:
+            if isinstance(optimizer, Adahessian):
+                mse.backward(create_graph=True)
+            else:
+                mse.backward()
+            optimizer.step()
         train_mse += mse.cpu().data.numpy() * len(inputs)
         # accuracy
         preds = torch.argmax(output, dim=-1)
@@ -168,7 +237,7 @@ def val_step(model, val_loader):
         inputs = inputs.cuda()
         targets = targets.cuda()
         with torch.no_grad():
-            output = model(inputs)
+            output = model.cuda()(inputs)
         # loss
         mse = torch.mean(torch.pow(output - targets, 2))
         val_mse += mse.cpu().data.numpy() * len(inputs)

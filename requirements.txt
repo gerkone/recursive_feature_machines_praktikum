@@ -8,3 +8,6 @@ torchvision==0.14.1
 hickle
 tqdm
 pandas
+torch-pso
+evotorch
+torch_optimizer

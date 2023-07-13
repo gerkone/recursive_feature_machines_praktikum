@@ -11,14 +11,14 @@ def euclidean_distances(samples, centers, squared=True):
         centers_norm = torch.sum(centers**2, dim=1, keepdim=True)
     centers_norm = torch.reshape(centers_norm, (1, -1))
 
-    distances = samples.mm(torch.t(centers))
-    distances.mul_(-2)
-    distances.add_(samples_norm)
-    distances.add_(centers_norm)
+    distances = torch.mm(samples, centers.T)
+    distances = -2 * distances
+    distances = distances + samples_norm
+    distances = distances + centers_norm
     # print(centers_norm.size(), samples_norm.size(), distances.size())
     if not squared:
-        distances.clamp_(min=0)
-        distances.sqrt_()
+        distances = torch.clamp(distances, min=1e-6)
+        distances = torch.sqrt(distances)
 
     return distances
 
@@ -34,15 +34,15 @@ def euclidean_distances_M(samples, centers, M, squared=True):
         centers_norm = torch.sum(centers_norm, dim=1, keepdim=True)
 
     centers_norm = torch.reshape(centers_norm, (1, -1))
+    distances = torch.mm(samples, M @ centers.T)
 
-    distances = samples.mm(M @ torch.t(centers))
-    distances.mul_(-2)
-    distances.add_(samples_norm)
-    distances.add_(centers_norm)
+    distances = -2 * distances
+    distances = distances + samples_norm
+    distances = distances + centers_norm
 
     if not squared:
-        distances.clamp_(min=0)
-        distances.sqrt_()
+        distances = torch.clamp(distances, min=1e-6)
+        distances = torch.sqrt(distances)
 
     return distances
 
@@ -60,10 +60,10 @@ def gaussian(samples, centers, bandwidth):
     """
     assert bandwidth > 0
     kernel_mat = euclidean_distances(samples, centers)
-    kernel_mat.clamp_(min=0)
+    kernel_mat = torch.clamp(kernel_mat, min=1e-6)
     gamma = 1.0 / (2 * bandwidth**2)
-    kernel_mat.mul_(-gamma)
-    kernel_mat.exp_()
+    kernel_mat = -gamma * kernel_mat
+    kernel_mat = torch.exp(kernel_mat)
 
     # print(samples.size(), centers.size(),
     #      kernel_mat.size())
@@ -83,20 +83,20 @@ def laplacian(samples, centers, bandwidth):
     """
     assert bandwidth > 0
     kernel_mat = euclidean_distances(samples, centers, squared=False)
-    kernel_mat.clamp_(min=0)
+    kernel_mat = torch.clamp(kernel_mat, min=1e-6)
     gamma = 1.0 / bandwidth
-    kernel_mat.mul_(-gamma)
-    kernel_mat.exp_()
+    kernel_mat = -gamma * kernel_mat
+    kernel_mat = torch.exp(kernel_mat)
     return kernel_mat
 
 
 def laplacian_M(samples, centers, bandwidth, M):
     assert bandwidth > 0
     kernel_mat = euclidean_distances_M(samples, centers, M, squared=False)
-    kernel_mat.clamp_(min=0)
+    kernel_mat = torch.clamp(kernel_mat, min=1e-6)
     gamma = 1.0 / bandwidth
-    kernel_mat.mul_(-gamma)
-    kernel_mat.exp_()
+    kernel_mat = -gamma * kernel_mat
+    kernel_mat = torch.exp(kernel_mat)
     return kernel_mat
 
 
@@ -114,7 +114,7 @@ def dispersal(samples, centers, bandwidth, gamma):
     """
     assert bandwidth > 0
     kernel_mat = euclidean_distances(samples, centers)
-    kernel_mat.pow_(gamma / 2.0)
-    kernel_mat.mul_(-1.0 / bandwidth)
-    kernel_mat.exp_()
+    kernel_mat = kernel_mat ** (gamma / 2.0)
+    kernel_mat = (-1.0 / bandwidth) * kernel_mat
+    kernel_mat = torch.exp(kernel_mat)
     return kernel_mat
