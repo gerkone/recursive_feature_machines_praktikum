@@ -30,19 +30,22 @@ def visualize_M_dict(
     shape: Optional[Tuple[int, ...]] = None,
     idx: Optional[int] = None,
     title: Optional[str] = None,
+    is_pearson: bool = False,
 ):
     if target_plots is None or len(target_plots) == 0:
         target_plots = ["diag", "eig"]
     assert all([x in ["diag", "eig"] for x in target_plots])
+    suffix = "%" if not is_pearson else ""
+    prefix = "Pearson: " if is_pearson else "Acc: "
     # get the feature matrices
     F_dict = {}
-    for key, (acc, M) in M_dict.items():
+    for key, (val, M) in M_dict.items():
         plots = []
         if "diag" in target_plots:
             plots.append(get_diagonal_features(M))
         if "eig" in target_plots:
             plots.append(get_max_eigenvector(M, shape))
-        F_dict[key] = (acc, plots)
+        F_dict[key] = (val, plots)
 
     # plot the feature matrices side by side
     fig, ax = plt.subplots(
@@ -55,18 +58,19 @@ def visualize_M_dict(
     # set title
     if title is not None:
         fig.suptitle(title)
+        fig.tight_layout()
     if len(F_dict) == 1:
-        acc, plots = list(F_dict.values())[0]
+        val, plots = list(F_dict.values())[0]
         for p, F in enumerate(plots):
             ax[p].imshow(F)
             ax[p].axis("off")
-        ax[0].set_title(f"{key} ({acc:.2f}%)")
+        ax[0].set_title(f"{key} ({val:.2f}%)")
     else:
-        for i, (key, (acc, plots)) in enumerate(F_dict.items()):
+        for i, (key, (val, plots)) in enumerate(F_dict.items()):
             for p, F in enumerate(plots):
                 ax[p, i].imshow(F)
                 ax[p, i].axis("off")
-            ax[0, i].set_title(f"{key} ({acc:.2f}%)")
+            ax[0, i].set_title(f"{key} ({prefix}{val:.2f}{suffix})")
     if save:
         idx = 0 if idx is None else idx
         plt.savefig(f"./video_logs/{idx}.png", bbox_inches="tight", pad_inches=0)
@@ -76,8 +80,13 @@ def visualize_M_dict(
 def get_max_eigenvector(M: np.ndarray, shape=None) -> np.ndarray:
     d = M.shape[0]
     if shape is None:
-        size = int(np.sqrt(d // 3))
-        shape = (3, size, size)
+        c = 3
+        size = np.sqrt(d // c)
+        if size != int(size):
+            c = 1
+            size = np.sqrt(d)
+        size = int(size)
+        shape = (c, size, size)
     # u, v = np.linalg.eigh(M)
     u, v = scipy.linalg.eigh(M, subset_by_index=(d - 1, d - 1))
     idx = np.argmax(u)

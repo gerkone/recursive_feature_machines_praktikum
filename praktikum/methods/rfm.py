@@ -1,6 +1,5 @@
 from typing import Optional
 
-import hickle
 import methods.kernels as kernels
 import numpy as np
 import torch
@@ -91,6 +90,7 @@ def train(
     batch_size: int = 2,
     reg: float = 1e-3,
     L: int = 10,
+    soft_gamma: int = 1.0,
 ):
     if isinstance(train_loader, torch.utils.data.DataLoader):
         X_train, y_train = get_data(train_loader)
@@ -115,6 +115,9 @@ def train(
     train_accs = []
     test_accs = []
 
+    best_test_mse = float("Inf")
+    best_test_acc = 0.0
+
     if M is None:
         M = torch.eye(d, dtype=torch.float32)
 
@@ -130,9 +133,23 @@ def train(
         test_mse, test_acc = eval_rfm(M, X_train, X_test, y_test, sol=sol)
         test_accs.append(test_acc)
 
-        M = get_grads(X_train, sol, L, M, batch_size=batch_size).float()
+        if test_mse < best_test_mse:
+            best_test_mse = test_mse
+        if test_acc > best_test_acc:
+            best_test_acc = test_acc
 
-    return M, test_mse, test_acc, (train_accs, test_accs)
+        M_ = get_grads(X_train, sol, L, M, batch_size=batch_size).float()
+        M = M * (1 - soft_gamma) + M_ * soft_gamma
+
+    test_mse, test_acc = eval_rfm(M, X_train, X_test, y_test, y_train=y_train)
+    test_accs.append(test_acc)
+
+    if test_mse < best_test_mse:
+        best_test_mse = test_mse
+    if test_acc > best_test_acc:
+        best_test_acc = test_acc
+
+    return M, best_test_mse, best_test_acc, (train_accs, test_accs)
 
 
 class RFMLP(torch.nn.Module):
@@ -141,12 +158,11 @@ class RFMLP(torch.nn.Module):
         self.L = L
         self.reg = reg
 
-        self.lin = torch.nn.Linear(d, d, bias=False)
+        self.lin = torch.nn.Parameter(torch.eye(d, dtype=torch.float32))
 
     @property
     def M(self):
-        M = self.lin.weight
-        M = M.T @ M
+        M = self.lin.T @ self.lin
         return M
 
     def forward(self, X, y):
@@ -169,8 +185,9 @@ class RFMLP2(RFMLP):
 
     def forward(self, X, y):
         # average over batch
-        M2 = self.net(X).mean(dim=0, keepdim=True)
-        M2 = M2.T @ M2
+        device = self.net.first.weight.device
+        M2 = self.net(X.to(device)).mean(dim=0, keepdim=True)
+        M2 = (M2.T @ M2).cpu()
         # M memory
         self._M = M2
         K_train = laplace_kernel_M(X, X, self.L, M2)
@@ -183,8 +200,9 @@ class RFMCNN(RFMLP):
     def __init__(self, d, L, reg):
         super().__init__(d, L, reg)
         self._M = None
+        self.c = 1 if np.isclose(d, int(d)) else 3
 
-        self.net = nn.CNN(d)
+        self.net = nn.CNN(d, self.c)
 
     @property
     def M(self):
@@ -193,9 +211,13 @@ class RFMCNN(RFMLP):
     def forward(self, X, y):
         # average over batch
         bs, d2 = X.shape
-        d = int(np.sqrt(d2))
-        M2 = self.net(X.view(bs, d, d)).mean(dim=0, keepdim=True)
+        c = self.c
+        d = np.sqrt(d2)
+        d = int(np.sqrt(d2 / self.c))
+        device = self.net.conv1.weight.device
+        M2 = self.net(X.view(bs, c, d, d).to(device)).mean(dim=0, keepdim=True)
         M2 = M2.T @ M2
+        M2 = M2.view(d2, d2).cpu()
         # M memory
         self._M = M2
         K_train = laplace_kernel_M(X, X, self.L, M2)
@@ -211,6 +233,7 @@ def train_hypernet(
     iters: int = 3,
     reg: float = 1e-3,
     L: int = 10,
+    lr: float = 0.1,
 ):
     if isinstance(train_loader, torch.utils.data.DataLoader):
         X_train, y_train = get_data(train_loader)
@@ -238,8 +261,10 @@ def train_hypernet(
     if model is None:
         model = RFMLP(d, L, reg)
 
-    opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
 
+    best_test_mse = np.inf
+    best_test_acc = 0
     for _ in range(iters):
         sol = model(X_train, y_train)
         mse, train_acc = eval_rfm(model.M, X_train, X_train, y_train, sol=sol)
@@ -252,7 +277,20 @@ def train_hypernet(
         mse.backward()
         opt.step()
 
-    return model, test_mse, test_acc, (train_accs, test_accs)
+        if test_mse < best_test_mse:
+            best_test_mse = test_mse
+        if test_acc > best_test_acc:
+            best_test_acc = test_acc
+
+    test_mse, test_acc = eval_rfm(model.M, X_train, X_test, y_test, y_train=y_train)
+    test_accs.append(test_acc)
+
+    if test_mse < best_test_mse:
+        best_test_acc = test_mse
+    if test_acc > best_test_acc:
+        best_test_acc = test_acc
+
+    return model, best_test_acc, best_test_acc, (train_accs, test_accs)
 
 
 def eval_rfm(

@@ -51,6 +51,10 @@ class MLP(nn.Module):
         return self.fc[2]
 
     @property
+    def third(self):
+        return self.fc[4]
+
+    @property
     def last(self):
         return self.fc[-1]
 
@@ -63,6 +67,12 @@ class MLP(nn.Module):
     @property
     def M_second(self):
         M = self.second.weight.data.cpu().numpy()
+        M = M.T @ M
+        return M
+
+    @property
+    def M_third(self):
+        M = self.third.weight.data.cpu().numpy()
         M = M.T @ M
         return M
 
@@ -103,24 +113,29 @@ class MLP(nn.Module):
 
 
 class CNN(nn.Module):
-    def __init__(self, out_size: int):
+    def __init__(self, out_size: int, c: int = 1, d: Optional[int] = None):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 16, 3, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
-        self.fc1 = nn.Linear(32 * 7 * 7, 128)
-        self.fc2 = nn.Linear(128, out_size)
+        if d is None:
+            d = np.sqrt(out_size / c).astype(int)
+        self.conv1 = nn.Conv2d(c, 8, 1)
+        self.conv2 = nn.Conv2d(8, 16, 1)
+        self.conv3 = nn.Conv2d(16, 32, 3)
+        self.conv4 = nn.Conv2d(32, 64, 3)
+        self.fc1 = nn.Linear(64 * d // 8 * d // 8, 128)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, out_size)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = torch.relu(x)
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
         x = torch.max_pool2d(x, 2)
-        x = self.conv2(x)
-        x = torch.relu(x)
+        x = torch.relu(self.conv3(x))
+        x = torch.relu(self.conv4(x))
         x = torch.max_pool2d(x, 2)
         x = torch.flatten(x, 1)
-        x = self.fc1(x)
-        x = torch.relu(x)
-        x = self.fc2(x)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
         return x
 
 

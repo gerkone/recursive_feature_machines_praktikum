@@ -5,6 +5,10 @@ xgboost==1.7.5
 
 torch==1.13.1
 torchvision==0.14.1
+
+--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cuda]
+
 hickle
 tqdm
 pandas
