@@ -1,11 +1,10 @@
 from typing import Optional
 
 import methods.kernels as kernels
+import methods.nn as nn
 import numpy as np
 import torch
 from torch.linalg import solve
-
-import methods.nn as nn
 
 
 def laplace_kernel_M(pair1, pair2, bandwidth, M):

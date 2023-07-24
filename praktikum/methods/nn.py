@@ -1,12 +1,13 @@
-from typing import Dict, List, Optional, Tuple
 import copy
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
-from torch_pso import ParticleSwarmOptimizer
-from torch_optimizer.adahessian import Adahessian
 import scipy
+import torch
 import torch.nn as nn
+from torch_optimizer.adahessian import Adahessian
+from torch_pso import ParticleSwarmOptimizer
+from utils.misc import unsqueeze_shape
 from utils.visualize import get_diagonal_features
 
 
@@ -16,7 +17,7 @@ class MLP(nn.Module):
         dim: int,
         width: int = 128,
         num_layers: int = 3,
-        num_classes: int = 2,
+        out_size: int = 2,
         activation: nn.Module = nn.ReLU,
         bias: bool = False,
         grok_init: bool = False,
@@ -32,7 +33,7 @@ class MLP(nn.Module):
             layers.append(activation())
             layers.append(nn.Linear(width, width, bias=bias))
         layers.append(activation())
-        layers.append(nn.Linear(width, num_classes, bias=bias))
+        layers.append(nn.Linear(width, out_size, bias=bias))
         self.fc = nn.Sequential(*layers)
 
     def reset_weights(self):
@@ -113,25 +114,35 @@ class MLP(nn.Module):
 
 
 class CNN(nn.Module):
-    def __init__(self, out_size: int, c: int = 1, d: Optional[int] = None):
+    def __init__(self, d: int, c: int = 3, pool_size: Tuple[int, int] = (2, 2)):
         super().__init__()
-        if d is None:
-            d = np.sqrt(out_size / c).astype(int)
-        self.conv1 = nn.Conv2d(c, 8, 1)
-        self.conv2 = nn.Conv2d(8, 16, 1)
-        self.conv3 = nn.Conv2d(16, 32, 3)
-        self.conv4 = nn.Conv2d(32, 64, 3)
-        self.fc1 = nn.Linear(64 * d // 8 * d // 8, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, out_size)
+        self.pool_size = pool_size
+        self.conv1 = nn.Conv2d(c, c, 4, padding="same")
+        self.conv2 = nn.Conv2d(c, c, 4, padding="same")
+        self.conv3 = nn.Conv2d(c, 8, 3)
+        self.conv4 = nn.Conv2d(8, 8, 3)
+        self.conv5 = nn.Conv2d(8, 16, 2)
+        self.conv6 = nn.Conv2d(16, 16, 2)
+        self.conv7 = nn.Conv2d(16, 8, 1)
+        self.conv8 = nn.Conv2d(8, 8, 1)
+
+        self.fc1 = nn.Linear(d, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 2)
 
     def forward(self, x):
+        if len(x.shape) == 2:
+            x = x.view(x.shape[0], *unsqueeze_shape(x.shape[1]))
         x = torch.relu(self.conv1(x))
         x = torch.relu(self.conv2(x))
-        x = torch.max_pool2d(x, 2)
+        x = torch.max_pool2d(x, self.pool_size[0])
         x = torch.relu(self.conv3(x))
         x = torch.relu(self.conv4(x))
-        x = torch.max_pool2d(x, 2)
+        x = torch.max_pool2d(x, self.pool_size[1])
+        x = torch.relu(self.conv5(x))
+        x = torch.relu(self.conv6(x))
+        x = torch.relu(self.conv7(x))
+        x = torch.relu(self.conv8(x))
         x = torch.flatten(x, 1)
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
@@ -147,7 +158,6 @@ def train(
     width=256,
     num_layers=4,
     bias=False,
-    name=None,
     frame_freq=None,
     lr=1e-2,
     weight_decay=1e-6,
@@ -163,7 +173,7 @@ def train(
             dim,
             width=width,
             num_layers=num_layers,
-            num_classes=num_classes,
+            out_size=num_classes,
             bias=bias,
             grok_init=grok_init,
         )
@@ -191,19 +201,19 @@ def train(
 
         _, train_acc = train_step(model, optimizer, train_loader)
 
-        val_mse, val_acc = val_step(model, val_loader)
-        train_accs.append(train_acc)
-        val_accs.append(val_acc)
-        if val_mse <= best_val_mse:
-            best_val_mse = val_mse
-            best_test_mse, best_test_acc = val_step(model, test_loader)
-            model_best = copy.deepcopy(model.cpu())
-            d = {}
-            d["state_dict"] = model_best.state_dict()
-            if name is not None:
-                torch.save(d, "nn_models/" + name + "_trained_nn.pth")
-    if best_test_acc == 0 and best_test_mse == 0:
+        if i % 10 == 0:
+            val_mse, val_acc = val_step(model, val_loader)
+            train_accs.append(train_acc)
+            val_accs.append(val_acc)
+            if val_mse <= best_val_mse:
+                best_val_mse = val_mse
+                best_test_mse, best_test_acc = val_step(model, test_loader)
+                model_best = copy.deepcopy(model.cpu())
+
+    val_mse, val_acc = val_step(model, val_loader)
+    if val_mse <= best_val_mse:
         best_test_mse, best_test_acc = val_step(model, test_loader)
+        model_best = copy.deepcopy(model.cpu())
 
     if frame_freq is not None:
         return model, best_test_mse, best_test_acc, (train_accs, val_accs), frames

@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 import numpy as np
-import scipy
 import matplotlib.pyplot as plt
+from .misc import unsqueeze_shape
 
 
 def visualize_curves_dict(
@@ -58,7 +58,6 @@ def visualize_M_dict(
     # set title
     if title is not None:
         fig.suptitle(title)
-        fig.tight_layout()
     if len(F_dict) == 1:
         val, plots = list(F_dict.values())[0]
         for p, F in enumerate(plots):
@@ -78,17 +77,9 @@ def visualize_M_dict(
 
 
 def get_max_eigenvector(M: np.ndarray, shape=None) -> np.ndarray:
-    d = M.shape[0]
     if shape is None:
-        c = 3
-        size = np.sqrt(d // c)
-        if size != int(size):
-            c = 1
-            size = np.sqrt(d)
-        size = int(size)
-        shape = (c, size, size)
-    # u, v = np.linalg.eigh(M)
-    u, v = scipy.linalg.eigh(M, subset_by_index=(d - 1, d - 1))
+        shape = unsqueeze_shape(M.shape[0])
+    u, v = np.linalg.eigh(M)
     idx = np.argmax(u)
     F = v.real[:, idx].reshape(shape)
     F = (F - F.min()) / (F.max() - F.min())

@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import sys, os
+import numpy as np
 
 
 @contextmanager
@@ -11,3 +12,14 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
+
+
+def unsqueeze_shape(d):
+    c = 3
+    size = np.sqrt(d // c)
+    if size != int(size):
+        c = 1
+        size = np.sqrt(d)
+    size = int(size)
+    shape = (c, size, size)
+    return shape
