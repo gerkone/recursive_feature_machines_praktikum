@@ -2,7 +2,6 @@ from typing import Dict, List
 import os
 from sklearn.model_selection import train_test_split
 import numpy as np
-import pandas as pd
 from urllib import request
 from scipy.io.arff import loadarff
 
