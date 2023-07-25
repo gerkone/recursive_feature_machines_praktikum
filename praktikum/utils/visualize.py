@@ -1,7 +1,21 @@
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+
+
 from .misc import unsqueeze_shape
+
+
+def pearson(x, y, eig=False):
+    if eig is True:
+        eig_x = get_max_eigenvector(x)
+        eig_y = get_max_eigenvector(y)
+    else:
+        eig_x = x
+        eig_y = y
+
+    return np.abs(pearsonr(eig_x.flatten(), eig_y.flatten()).statistic)
 
 
 def visualize_curves_dict(
